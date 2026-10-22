@@ -43,13 +43,8 @@ func (c *Config) loginHandler(ctx *fiber.Ctx) error {
 		ctx.Set(fiber.HeaderRetryAfter, strconv.Itoa(int(math.Ceil(retryAfter.Seconds()))))
 		return jsonError(ctx, fiber.StatusTooManyRequests, "too many failed attempts")
 	}
-	hash, err := c.Basic.decodedPasswordHash()
-	if err != nil {
-		logr.Errorf("[security.loginHandler] Failed to decode password hash: %s", err.Error())
-		return jsonError(ctx, fiber.StatusInternalServerError, "internal error")
-	}
 	usernameOK := subtle.ConstantTimeCompare([]byte(body.Username), []byte(c.Basic.Username)) == 1
-	passwordErr := bcrypt.CompareHashAndPassword(hash, []byte(body.Password))
+	passwordErr := bcrypt.CompareHashAndPassword(c.passwordHash, []byte(body.Password))
 	if !usernameOK || passwordErr != nil {
 		return jsonError(ctx, fiber.StatusUnauthorized, "invalid credentials")
 	}

@@ -26,6 +26,9 @@ type Config struct {
 	BruteForce *BruteForceConfig `yaml:"brute-force,omitempty"`
 
 	gate *g8.Gate
+
+	// passwordHash is the decoded bcrypt hash, set by RegisterHandlers when the login form is enabled
+	passwordHash []byte
 }
 
 // ValidateAndSetDefaults returns whether the security configuration is valid or not and sets default values.
@@ -62,6 +65,12 @@ func (c *Config) RegisterHandlers(router fiber.Router) error {
 		logr.Infof("[security.RegisterHandlers] Registered OIDC routes (/oidc/login, /authorization-code/callback)")
 	}
 	if c.Basic != nil && c.Basic.LoginForm {
+		hash, err := c.Basic.decodedPasswordHash()
+		if err != nil {
+			logr.Errorf("[security.RegisterHandlers] Failed to decode password-bcrypt-base64: %s", err.Error())
+			return err
+		}
+		c.passwordHash = hash
 		limiter.configure(c.BruteForce)
 		router.Post("/login", c.loginHandler)
 		router.Post("/logout", c.logoutHandler)
