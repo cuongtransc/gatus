@@ -2828,6 +2828,8 @@ endpoints:
 | `security.basic`                        | HTTP Basic configuration                                                           | `{}`          |
 | `security.basic.username`               | Username for Basic authentication.                                                 | Required `""` |
 | `security.basic.password-bcrypt-base64` | Password hashed with Bcrypt and then encoded with base64 for Basic authentication. | Required `""` |
+| `security.basic.login-form`  | Show a username/password form in the UI instead of the browser's Basic Auth prompt. Uses a session cookie. | `false` |
+| `security.basic.session-ttl` | Session lifetime when `login-form` is enabled.                                                             | `8h`    |
 
 The example below will require that you authenticate with the username `john.doe` and the password `hunter2`:
 ```yaml
@@ -2839,6 +2841,17 @@ security:
 
 > ⚠ Make sure to carefully select the cost of the bcrypt hash. The higher the cost, the longer it takes to compute the hash,
 > and basic auth verifies the password against the hash on every request. As of 2023-01-06, I suggest a cost of 9.
+
+
+#### Brute-force protection
+Failed form logins are counted per client IP; the IP comes from `CF-Connecting-IP` only when the connection comes from a Cloudflare IP range or a `trusted-proxies` entry, and the state is kept in memory, per instance.
+
+| Parameter                             | Description                                                      | Default |
+|:--------------------------------------|:-----------------------------------------------------------------|:--------|
+| `security.brute-force.max-attempts`   | Failed logins from one IP within `window` before it is blocked.  | `5`     |
+| `security.brute-force.window`         | Period in which failed logins are counted.                       | `15m`   |
+| `security.brute-force.block-duration` | How long a blocked IP gets `429` on `/login`.                    | `30m`   |
+| `security.brute-force.trusted-proxies`| Extra IPs/CIDRs (e.g. a cloudflared tunnel) allowed to set `CF-Connecting-IP`. | `[]` |
 
 
 #### OIDC
