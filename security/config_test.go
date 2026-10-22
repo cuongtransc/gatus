@@ -245,6 +245,18 @@ func TestConfig_ValidateAndSetDefaults_BasicWithoutLoginFormKeepsBruteForceNil(t
 	}
 }
 
+func TestConfig_ValidateAndSetDefaults_LoginFormNegativeSessionTTL(t *testing.T) {
+	c := &Config{Basic: &BasicConfig{
+		Username:                        "test",
+		PasswordBcryptHashBase64Encoded: "somevalue",
+		LoginForm:                       true,
+		SessionTTL:                      -time.Second,
+	}}
+	if c.ValidateAndSetDefaults() {
+		t.Error("expected negative session-ttl to be invalid")
+	}
+}
+
 func TestBruteForceConfig_ValidateAndSetDefaults(t *testing.T) {
 	scenarios := []struct {
 		Name            string

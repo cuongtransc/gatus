@@ -35,7 +35,10 @@ func (c *Config) ValidateAndSetDefaults() bool {
 		return false
 	}
 	if c.Basic != nil && c.Basic.LoginForm {
-		if c.Basic.SessionTTL <= 0 {
+		if c.Basic.SessionTTL < 0 {
+			return false
+		}
+		if c.Basic.SessionTTL == 0 {
 			c.Basic.SessionTTL = DefaultBasicSessionTTL
 		}
 		if c.BruteForce == nil {
