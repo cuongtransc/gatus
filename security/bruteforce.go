@@ -1,6 +1,7 @@
 package security
 
 import (
+	"net"
 	"sync"
 	"time"
 )
@@ -48,53 +49,58 @@ func (l *bruteForceLimiter) configure(cfg *BruteForceConfig) {
 	l.blockDuration = cfg.BlockDuration
 }
 
-// Fail records a failed attempt for ip and returns whether this attempt caused the IP to become blocked
-func (l *bruteForceLimiter) Fail(ip string) (blockedNow bool) {
+// Attempt counts a login attempt from ip before its credentials are checked, so concurrent requests cannot
+// exceed the cap. It returns whether the attempt may proceed; when it may not, retryAfter is the remaining block time.
+// blockedNow is true only for the attempt that started the block. A successful login must call Reset.
+func (l *bruteForceLimiter) Attempt(ip string) (allowed bool, retryAfter time.Duration, blockedNow bool) {
+	key := limiterKey(ip)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
-	entry, exists := l.entries[ip]
+	entry, exists := l.entries[key]
 	if !exists {
 		l.makeRoom(now)
 		entry = &bruteForceEntry{windowStart: now}
-		l.entries[ip] = entry
+		l.entries[key] = entry
 	}
 	entry.lastSeen = now
-	if now.Before(entry.blockedUntil) {
-		return false
+	if remaining := entry.blockedUntil.Sub(now); remaining > 0 {
+		return false, remaining, false
 	}
-	if entry.failures == 0 || now.Sub(entry.windowStart) > l.window {
+	if !entry.blockedUntil.IsZero() || entry.failures == 0 || now.Sub(entry.windowStart) > l.window {
+		entry.blockedUntil = time.Time{}
 		entry.failures = 0
 		entry.windowStart = now
 	}
 	entry.failures++
-	if entry.failures >= l.maxAttempts {
+	if entry.failures > l.maxAttempts {
 		entry.blockedUntil = now.Add(l.blockDuration)
 		entry.failures = 0
-		return true
+		return false, l.blockDuration, true
 	}
-	return false
-}
-
-// Blocked returns whether ip is currently blocked and, if so, for how much longer
-func (l *bruteForceLimiter) Blocked(ip string) (bool, time.Duration) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	entry, exists := l.entries[ip]
-	if !exists {
-		return false, 0
-	}
-	if remaining := entry.blockedUntil.Sub(l.now()); remaining > 0 {
-		return true, remaining
-	}
-	return false, 0
+	return true, 0, false
 }
 
 // Reset forgets everything known about ip
 func (l *bruteForceLimiter) Reset(ip string) {
+	key := limiterKey(ip)
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	delete(l.entries, ip)
+	delete(l.entries, key)
+}
+
+// limiterKey maps a client IP to the key it is limited under: IPv4 (including IPv4-mapped) addresses are kept,
+// IPv6 addresses are collapsed to their /64 network, and unparseable input is returned unchanged
+func limiterKey(ip string) string {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return ip
+	}
+	if v4 := parsed.To4(); v4 != nil {
+		return v4.String()
+	}
+	mask := net.CIDRMask(64, 128)
+	return (&net.IPNet{IP: parsed.Mask(mask), Mask: mask}).String()
 }
 
 // makeRoom frees a slot for a new entry when the table is full. The caller must hold l.mu.

@@ -1,6 +1,8 @@
 package security
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -16,86 +18,129 @@ func newTestLimiter() (*bruteForceLimiter, *fakeClock) {
 	return l, clock
 }
 
-func TestBruteForceLimiter_BelowThresholdNotBlocked(t *testing.T) {
-	l, _ := newTestLimiter()
-	if l.Fail("1.1.1.1") || l.Fail("1.1.1.1") {
-		t.Fatal("expected no block below threshold")
+func attempts(l *bruteForceLimiter, ip string, n int) {
+	for i := 0; i < n; i++ {
+		l.Attempt(ip)
 	}
-	if blocked, _ := l.Blocked("1.1.1.1"); blocked {
-		t.Error("expected not blocked")
+}
+
+func TestBruteForceLimiter_BelowThresholdAllowed(t *testing.T) {
+	l, _ := newTestLimiter()
+	for i := 0; i < 3; i++ {
+		if allowed, _, _ := l.Attempt("1.1.1.1"); !allowed {
+			t.Fatalf("expected attempt %d to be allowed", i+1)
+		}
 	}
 }
 
 func TestBruteForceLimiter_ThresholdBlocks(t *testing.T) {
 	l, _ := newTestLimiter()
-	l.Fail("1.1.1.1")
-	l.Fail("1.1.1.1")
-	if !l.Fail("1.1.1.1") {
-		t.Fatal("expected third failure to block")
+	attempts(l, "1.1.1.1", 3)
+	allowed, retryAfter, blockedNow := l.Attempt("1.1.1.1")
+	if allowed || retryAfter != 10*time.Minute || !blockedNow {
+		t.Fatalf("4th: expected (false, 10m, true), got (%v, %s, %v)", allowed, retryAfter, blockedNow)
 	}
-	blocked, remaining := l.Blocked("1.1.1.1")
-	if !blocked || remaining != 10*time.Minute {
-		t.Errorf("expected blocked for 10m, got blocked=%v remaining=%s", blocked, remaining)
+	allowed, retryAfter, blockedNow = l.Attempt("1.1.1.1")
+	if allowed || retryAfter != 10*time.Minute || blockedNow {
+		t.Fatalf("5th: expected (false, 10m, false), got (%v, %s, %v)", allowed, retryAfter, blockedNow)
 	}
-	if blocked, _ := l.Blocked("2.2.2.2"); blocked {
+	if allowed, _, _ := l.Attempt("2.2.2.2"); !allowed {
 		t.Error("expected other IPs to be unaffected")
 	}
 }
 
 func TestBruteForceLimiter_BlockExpires(t *testing.T) {
 	l, clock := newTestLimiter()
-	for i := 0; i < 3; i++ {
-		l.Fail("1.1.1.1")
-	}
+	attempts(l, "1.1.1.1", 4)
 	clock.t = clock.t.Add(10*time.Minute + time.Second)
-	if blocked, _ := l.Blocked("1.1.1.1"); blocked {
-		t.Fatal("expected block to have expired")
-	}
-	if l.Fail("1.1.1.1") {
-		t.Error("expected counter to start fresh after block expiry")
+	if allowed, _, _ := l.Attempt("1.1.1.1"); !allowed {
+		t.Fatal("expected attempt allowed after block expiry")
 	}
 }
 
-func TestBruteForceLimiter_WindowExpiryForgetsFailures(t *testing.T) {
+func TestBruteForceLimiter_WindowExpiryForgetsAttempts(t *testing.T) {
 	l, clock := newTestLimiter()
-	l.Fail("1.1.1.1")
-	l.Fail("1.1.1.1")
+	attempts(l, "1.1.1.1", 3)
 	clock.t = clock.t.Add(61 * time.Second)
-	if l.Fail("1.1.1.1") {
-		t.Error("expected failures outside the window to be forgotten")
+	if allowed, _, _ := l.Attempt("1.1.1.1"); !allowed {
+		t.Error("expected attempts outside the window to be forgotten")
 	}
 }
 
 func TestBruteForceLimiter_Reset(t *testing.T) {
 	l, _ := newTestLimiter()
-	l.Fail("1.1.1.1")
-	l.Fail("1.1.1.1")
+	attempts(l, "1.1.1.1", 3)
 	l.Reset("1.1.1.1")
-	l.Fail("1.1.1.1")
-	if l.Fail("1.1.1.1") {
-		t.Error("expected reset to clear failures")
+	for i := 0; i < 3; i++ {
+		if allowed, _, _ := l.Attempt("1.1.1.1"); !allowed {
+			t.Fatalf("expected attempt %d after reset to be allowed", i+1)
+		}
 	}
 }
 
 func TestBruteForceLimiter_CapacityEvictsOldestUnblocked(t *testing.T) {
 	l, clock := newTestLimiter()
 	l.maxEntries = 3
-	for i := 0; i < 3; i++ {
-		l.Fail("a")
-	}
+	attempts(l, "a", 4)
 	clock.t = clock.t.Add(time.Second)
-	l.Fail("b")
+	l.Attempt("b")
 	clock.t = clock.t.Add(time.Second)
-	l.Fail("c")
+	l.Attempt("c")
 	clock.t = clock.t.Add(time.Second)
-	l.Fail("d")
+	l.Attempt("d")
 	if len(l.entries) > 3 {
 		t.Fatalf("expected at most 3 entries, got %d", len(l.entries))
 	}
-	if blocked, _ := l.Blocked("a"); !blocked {
-		t.Error("expected blocked entry to survive eviction")
-	}
 	if _, exists := l.entries["b"]; exists {
 		t.Error("expected oldest unblocked entry 'b' to be evicted")
+	}
+	if allowed, _, _ := l.Attempt("a"); allowed {
+		t.Error("expected blocked entry to survive eviction")
+	}
+}
+
+func TestBruteForceLimiter_ConcurrentAttemptsCapped(t *testing.T) {
+	l, _ := newTestLimiter()
+	var allowedCount int32
+	var wg sync.WaitGroup
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if allowed, _, _ := l.Attempt("1.1.1.1"); allowed {
+				atomic.AddInt32(&allowedCount, 1)
+			}
+		}()
+	}
+	wg.Wait()
+	if allowedCount != 3 {
+		t.Errorf("expected exactly 3 allowed attempts, got %d", allowedCount)
+	}
+}
+
+func TestBruteForceLimiter_IPv6SharesSlash64(t *testing.T) {
+	l, _ := newTestLimiter()
+	attempts(l, "2001:db8:1:2::1", 3)
+	if allowed, _, _ := l.Attempt("2001:db8:1:2::ffff"); allowed {
+		t.Error("expected same /64 to share the counter")
+	}
+	if allowed, _, _ := l.Attempt("2001:db8:1:3::1"); !allowed {
+		t.Error("expected a different /64 to be unaffected")
+	}
+}
+
+func TestLimiterKey(t *testing.T) {
+	scenarios := []struct{ Name, IP, Expected string }{
+		{"ipv4", "203.0.113.7", "203.0.113.7"},
+		{"ipv4-mapped", "::ffff:1.2.3.4", "1.2.3.4"},
+		{"ipv6", "2001:db8:1:2:aaaa:bbbb:cccc:dddd", "2001:db8:1:2::/64"},
+		{"garbage", "garbage", "garbage"},
+	}
+	for _, scenario := range scenarios {
+		t.Run(scenario.Name, func(t *testing.T) {
+			if actual := limiterKey(scenario.IP); actual != scenario.Expected {
+				t.Errorf("expected %s, got %s", scenario.Expected, actual)
+			}
+		})
 	}
 }
