@@ -86,8 +86,27 @@ func TestLogin_Success(t *testing.T) {
 
 func TestLogin_FormEncoded(t *testing.T) {
 	app := newLoginFormApp(t)
-	request := httptest.NewRequest("POST", "/login", strings.NewReader("username=john.doe&password=hunter2"))
-	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	for i := 0; i < 10; i++ {
+		request := httptest.NewRequest("POST", "/login", strings.NewReader("username=john.doe&password=wrong"))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := doRequest(t, app, request)
+		if response.StatusCode != 400 {
+			t.Fatalf("attempt %d: expected 400 for a form-encoded body, got %d", i+1, response.StatusCode)
+		}
+		body, _ := io.ReadAll(response.Body)
+		if string(body) != `{"error":"invalid request"}` {
+			t.Fatalf("unexpected body %s", body)
+		}
+	}
+	if code := postLogin(t, app, "john.doe", "hunter2").StatusCode; code != 200 {
+		t.Error("expected form-encoded requests not to count as attempts, got", code)
+	}
+}
+
+func TestLogin_JSONWithCharset(t *testing.T) {
+	app := newLoginFormApp(t)
+	request := httptest.NewRequest("POST", "/login", strings.NewReader(`{"username":"john.doe","password":"hunter2"}`))
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 	if code := doRequest(t, app, request).StatusCode; code != 200 {
 		t.Error("expected 200, got", code)
 	}

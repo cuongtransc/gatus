@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/TwiN/logr"
@@ -14,8 +15,15 @@ import (
 )
 
 type loginRequest struct {
-	Username string `json:"username" form:"username"`
-	Password string `json:"password" form:"password"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+// isJSONRequest returns whether the request's Content-Type is application/json (parameters such as charset allowed).
+// Only JSON is accepted on /login because a form-encoded POST can be sent cross-site without a CORS preflight.
+func isJSONRequest(ctx *fiber.Ctx) bool {
+	mediaType, _, _ := strings.Cut(ctx.Get(fiber.HeaderContentType), ";")
+	return strings.EqualFold(strings.TrimSpace(mediaType), fiber.MIMEApplicationJSON)
 }
 
 func jsonError(ctx *fiber.Ctx, status int, message string) error {
@@ -30,6 +38,9 @@ func (c *Config) usesSessions() bool {
 
 // loginHandler authenticates a username/password pair and creates a session
 func (c *Config) loginHandler(ctx *fiber.Ctx) error {
+	if !isJSONRequest(ctx) {
+		return jsonError(ctx, fiber.StatusBadRequest, "invalid request")
+	}
 	var body loginRequest
 	if err := ctx.BodyParser(&body); err != nil || body.Username == "" || body.Password == "" {
 		return jsonError(ctx, fiber.StatusBadRequest, "invalid request")
