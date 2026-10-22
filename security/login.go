@@ -83,8 +83,10 @@ func (c *Config) logoutHandler(ctx *fiber.Ctx) error {
 }
 
 func (c *Config) sessionCookie(ctx *fiber.Ctx, value string, expires time.Time) *fiber.Cookie {
-	secure := ctx.Protocol() == "https" ||
-		(isTrustedProxy(ctx.Context().RemoteIP(), c.trustedNets()) && ctx.Get("X-Forwarded-Proto") == "https")
+	// ctx.Protocol() trusts X-Forwarded-Proto from any peer, so only honour forwarded scheme headers from trusted proxies
+	secure := ctx.Context().IsTLS() ||
+		(isTrustedProxy(ctx.Context().RemoteIP(), c.trustedNets()) &&
+			(ctx.Get("X-Forwarded-Proto") == "https" || strings.Contains(ctx.Get("CF-Visitor"), `"scheme":"https"`)))
 	return &fiber.Cookie{
 		Name:     cookieNameSession,
 		Value:    value,

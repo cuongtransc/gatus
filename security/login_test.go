@@ -84,6 +84,49 @@ func TestLogin_Success(t *testing.T) {
 	}
 }
 
+func TestLogin_SecureIgnoresForwardedProtoFromUntrustedPeer(t *testing.T) {
+	app := newLoginFormApp(t)
+	request := httptest.NewRequest("POST", "/login", strings.NewReader(`{"username":"john.doe","password":"hunter2"}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("X-Forwarded-Proto", "https")
+	response := doRequest(t, app, request)
+	if response.StatusCode != 200 {
+		t.Fatal("expected 200, got", response.StatusCode)
+	}
+	cookie := sessionCookie(response)
+	if cookie == nil {
+		t.Fatal("expected session cookie")
+	}
+	if cookie.Secure {
+		t.Error("expected Secure=false when an untrusted peer sends X-Forwarded-Proto: https")
+	}
+}
+
+func TestLogin_SecureHonoursForwardedSchemeFromTrustedPeer(t *testing.T) {
+	for _, header := range [][2]string{{"X-Forwarded-Proto", "https"}, {"CF-Visitor", `{"scheme":"https"}`}} {
+		limiter = newBruteForceLimiter(time.Now)
+		// fiber's app.Test connections come from 0.0.0.0
+		c := &Config{
+			Basic:      &BasicConfig{Username: "john.doe", PasswordBcryptHashBase64Encoded: hunter2BcryptB64, LoginForm: true},
+			BruteForce: &BruteForceConfig{TrustedProxies: []string{"0.0.0.0"}},
+		}
+		if !c.ValidateAndSetDefaults() {
+			t.Fatal("expected config to be valid")
+		}
+		app := fiber.New()
+		if err := c.RegisterHandlers(app); err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest("POST", "/login", strings.NewReader(`{"username":"john.doe","password":"hunter2"}`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set(header[0], header[1])
+		cookie := sessionCookie(doRequest(t, app, request))
+		if cookie == nil || !cookie.Secure {
+			t.Errorf("expected Secure=true for %s from a trusted peer, got %+v", header[0], cookie)
+		}
+	}
+}
+
 func TestLogin_FormEncoded(t *testing.T) {
 	app := newLoginFormApp(t)
 	for i := 0; i < 10; i++ {
