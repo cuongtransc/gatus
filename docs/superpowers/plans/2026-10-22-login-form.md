@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Opt-in username/password form login (instead of the Basic Auth popup) with per-IP brute-force blocking that resolves the client IP from `CF-Connecting-IP` behind Cloudflare, plus a `mise.toml` that builds and pushes `cuongtransc/gatus`.
+**Goal:** Opt-in username/password form login (instead of the Basic Auth popup) with per-IP brute-force blocking that resolves the client IP from `CF-Connecting-IP` behind Cloudflare, plus a `mise.toml` that builds and pushes the `linux/amd64` image `cuongtransc/gatus`.
 
 **Architecture:** `security.basic.login-form: true` registers `POST /login` + `POST /logout`, which create/delete sessions in the existing in-memory `sessions` cache; the protected router uses the same g8 session-cookie gate OIDC already uses. A package-level limiter counts failed logins per client IP; the client IP comes from `CF-Connecting-IP` only when the TCP peer is a Cloudflare range or a configured trusted proxy. The Vue login screen gains a form when `/api/v1/config` reports `loginForm: true`.
 
@@ -755,14 +755,14 @@ git commit -m "feat(ui): add username/password login form and logout button"
 
 ---
 
-### Task 7: mise tasks, multi-arch Dockerfile, README
+### Task 7: mise tasks, cross-compiling Dockerfile, README
 
 **Files:**
 - Create: `mise.toml`
 - Modify: `Dockerfile`
 - Modify: `README.md` (section `#### Basic Authentication`, around line 2825)
 
-- [ ] **Step 1: Dockerfile cross-compilation** — builder stage becomes `FROM --platform=$BUILDPLATFORM golang:alpine AS builder`, add `ARG TARGETOS TARGETARCH`, and the build line becomes:
+- [ ] **Step 1: Dockerfile cross-compilation** (so `--platform linux/amd64` on an arm64 Mac compiles natively instead of under QEMU) — builder stage becomes `FROM --platform=$BUILDPLATFORM golang:alpine AS builder`, add `ARG TARGETOS TARGETARCH`, and the build line becomes:
 
 ```dockerfile
 RUN --mount=type=cache,target=/root/.cache/go-build \
@@ -818,10 +818,10 @@ tag="$(git rev-parse --short HEAD)"
 docker buildx build --load -t "$image:$tag" -t "$image:latest" .
 """
 
-# Multi-arch build needs a docker-container builder; created once, reused after.
+# Server is Linux amd64; the Dockerfile cross-compiles, so this is fast on an arm64 Mac.
 # Requires `docker login` to the registry first.
 [tasks.release]
-description = "Build amd64+arm64 image and push $IMAGE:<sha> and :latest"
+description = "Build linux/amd64 image and push $IMAGE:<sha> and :latest"
 run = """
 set -eu
 image="${IMAGE:-cuongtransc/gatus}"
@@ -830,10 +830,7 @@ if [ -n "$(git status --porcelain)" ]; then
   echo "release: working tree is dirty; commit first so the tag matches the image" >&2
   exit 1
 fi
-docker buildx inspect gatus-multiarch >/dev/null 2>&1 \
-  || docker buildx create --name gatus-multiarch --driver docker-container >/dev/null
-docker buildx build --builder gatus-multiarch \
-  --platform linux/amd64,linux/arm64 \
+docker buildx build --platform linux/amd64 \
   -t "$image:$tag" -t "$image:latest" --push .
 echo "pushed $image:$tag and $image:latest"
 """
@@ -868,7 +865,7 @@ Then add a `#### Brute-force protection` subsection after it: one sentence (fail
 
 ```bash
 git add mise.toml Dockerfile README.md
-git commit -m "build: add mise tasks and multi-arch image release to cuongtransc/gatus"
+git commit -m "build: add mise tasks and amd64 image release to cuongtransc/gatus"
 ```
 
 ---
@@ -885,6 +882,6 @@ No code unless a defect is found (then: failing test first, fix, re-run this tas
 
 - [ ] **Step 4: Block check** — 3 wrong logins in the browser → message `Too many failed attempts. Try again in 30 min.`; server log contains `Blocking IP`. With curl from a non-Cloudflare peer, `-H 'CF-Connecting-IP: 1.2.3.4'` after the block still returns 429 (header ignored).
 
-- [ ] **Step 5: Docker** — `mise run docker:build > /tmp/login-form-docker.log 2>&1; echo exit=$?` → `exit=0`; `docker run --rm -p 18080:8080 cuongtransc/gatus:latest` answers `/health` with 200. Do **not** run `mise run release` unless the user asks.
+- [ ] **Step 5: Docker** — `mise run docker:build > /tmp/login-form-docker.log 2>&1; echo exit=$?` → `exit=0`; `docker run --rm -p 18080:8080 cuongtransc/gatus:latest` answers `/health` with 200. Then prove the release path without pushing: `docker buildx build --platform linux/amd64 --load -t gatus-amd64-check . > /tmp/login-form-docker-amd64.log 2>&1; echo exit=$?` → `exit=0`, and `docker image inspect gatus-amd64-check --format '{{.Architecture}}'` → `amd64`; remove that image afterwards. Do **not** run `mise run release` unless the user asks.
 
 - [ ] **Step 6: Stop the background process**; report results with screenshots paths.

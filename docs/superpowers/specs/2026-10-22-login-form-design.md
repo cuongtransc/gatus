@@ -14,7 +14,8 @@ Add a `mise.toml` that builds and pushes the Docker image to `cuongtransc/gatus`
   Basic Auth behaves exactly as today (no breaking change, keeps upstream merges easy).
 - **Cloudflare IP trusted only from Cloudflare peers.** `CF-Connecting-IP` is honoured only when
   the TCP peer is inside Cloudflare's published ranges or a configured `trusted-proxies` CIDR.
-- **Docker image is multi-arch** (`linux/amd64,linux/arm64`).
+- **Docker image is `linux/amd64` only** (the server is Linux amd64). It is built on the Mac
+  (arm64) by cross-compiling in the Dockerfile and pushed; the server only pulls.
 
 ## Configuration
 
@@ -100,10 +101,12 @@ variants; props-based, no provide/inject. `web/static/` is regenerated with `mak
 
 ## mise (`mise.toml`)
 
-Tasks: `build` (go build), `test` (go test ./...), `frontend:build`, `docker:build`
-(`docker buildx build --platform linux/amd64,linux/arm64 -t cuongtransc/gatus:<git short sha>
--t cuongtransc/gatus:latest`), `docker:push` (same build with `--push`), `ci` (frontend build +
-test). Image name overridable via `IMAGE` env var.
+Tasks: `dev`, `build`, `build:web`, `test`, `ci`; `docker:build` (native-arch image loaded
+locally for a smoke run); `release` (`docker buildx build --platform linux/amd64
+-t cuongtransc/gatus:<git short sha> -t cuongtransc/gatus:latest --push`, refuses a dirty tree).
+Image name overridable via `IMAGE`. The Dockerfile builder stage runs on `$BUILDPLATFORM` and
+cross-compiles with `GOOS=$TARGETOS GOARCH=$TARGETARCH`, so the amd64 image builds at native
+speed on an arm64 Mac.
 
 ## Testing
 
