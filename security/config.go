@@ -23,12 +23,29 @@ type Config struct {
 	Basic *BasicConfig `yaml:"basic,omitempty"`
 	OIDC  *OIDCConfig  `yaml:"oidc,omitempty"`
 
+	// BruteForce configures IP blocking for the login form. Defaults are applied when Basic.LoginForm is enabled.
+	BruteForce *BruteForceConfig `yaml:"brute-force,omitempty"`
+
 	gate *g8.Gate
 }
 
 // ValidateAndSetDefaults returns whether the security configuration is valid or not and sets default values.
 func (c *Config) ValidateAndSetDefaults() bool {
-	return (c.Basic == nil || c.Basic.isValid()) && (c.OIDC == nil || c.OIDC.ValidateAndSetDefaults())
+	if (c.Basic != nil && !c.Basic.isValid()) || (c.OIDC != nil && !c.OIDC.ValidateAndSetDefaults()) {
+		return false
+	}
+	if c.Basic != nil && c.Basic.LoginForm {
+		if c.Basic.SessionTTL <= 0 {
+			c.Basic.SessionTTL = DefaultBasicSessionTTL
+		}
+		if c.BruteForce == nil {
+			c.BruteForce = &BruteForceConfig{}
+		}
+	}
+	if c.BruteForce != nil {
+		return c.BruteForce.ValidateAndSetDefaults()
+	}
+	return true
 }
 
 // RegisterHandlers registers all handlers required based on the security configuration
