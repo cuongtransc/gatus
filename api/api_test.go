@@ -1,8 +1,10 @@
 package api
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/TwiN/gatus/v5/config"
@@ -128,5 +130,61 @@ func TestNew(t *testing.T) {
 				t.Errorf("%s %s should have returned %d, but returned %d instead", request.Method, request.URL, scenario.ExpectedCode, response.StatusCode)
 			}
 		})
+	}
+}
+
+func TestNew_LoginForm(t *testing.T) {
+	cfg := &config.Config{UI: &ui.Config{}, Security: &security.Config{
+		Basic: &security.BasicConfig{
+			Username:                        "john.doe",
+			PasswordBcryptHashBase64Encoded: "JDJhJDA4JDFoRnpPY1hnaFl1OC9ISlFsa21VS09wOGlPU1ZOTDlHZG1qeTFvb3dIckRBUnlHUmNIRWlT",
+			LoginForm:                       true,
+		},
+	}}
+	if !cfg.Security.ValidateAndSetDefaults() {
+		t.Fatal("expected security config to be valid")
+	}
+	router := New(cfg).Router()
+	readBody := func(response *http.Response) string {
+		body, _ := io.ReadAll(response.Body)
+		return string(body)
+	}
+	// Unauthenticated: config says login form, statuses are protected
+	response, _ := router.Test(httptest.NewRequest("GET", "/api/v1/config", http.NoBody))
+	if body := readBody(response); !strings.Contains(body, `"authenticated":false`) || !strings.Contains(body, `"loginForm":true`) {
+		t.Fatal("unexpected config body before login:", body)
+	}
+	response, _ = router.Test(httptest.NewRequest("GET", "/api/v1/endpoints/statuses", http.NoBody))
+	if response.StatusCode != fiber.StatusUnauthorized {
+		t.Fatal("expected 401 before login, got", response.StatusCode)
+	}
+	// Login
+	request := httptest.NewRequest("POST", "/login", strings.NewReader(`{"username":"john.doe","password":"hunter2"}`))
+	request.Header.Set("Content-Type", "application/json")
+	response, _ = router.Test(request)
+	if response.StatusCode != fiber.StatusOK {
+		t.Fatal("expected 200 from /login, got", response.StatusCode)
+	}
+	var sessionCookie *http.Cookie
+	for _, cookie := range response.Cookies() {
+		if cookie.Name == "gatus_session" {
+			sessionCookie = cookie
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatal("expected gatus_session cookie")
+	}
+	// Authenticated
+	request = httptest.NewRequest("GET", "/api/v1/config", http.NoBody)
+	request.AddCookie(sessionCookie)
+	response, _ = router.Test(request)
+	if body := readBody(response); !strings.Contains(body, `"authenticated":true`) {
+		t.Error("expected authenticated=true after login, got", body)
+	}
+	request = httptest.NewRequest("GET", "/api/v1/endpoints/statuses", http.NoBody)
+	request.AddCookie(sessionCookie)
+	response, _ = router.Test(request)
+	if response.StatusCode == fiber.StatusUnauthorized {
+		t.Error("expected protected route to accept the session cookie")
 	}
 }
