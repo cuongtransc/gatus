@@ -2844,7 +2844,13 @@ security:
 
 
 #### Brute-force protection
-Failed form logins are counted per client IP; the IP comes from `CF-Connecting-IP` only when the connection comes from a Cloudflare IP range or a `trusted-proxies` entry, and the state is kept in memory, per instance.
+Form logins are counted per client IP; the IP comes from `CF-Connecting-IP` only when the connection comes from a Cloudflare IP range or a `trusted-proxies` entry, and the state is kept in memory, per instance.
+Every login attempt is counted, and a successful login resets the count, so the attempt after `max-attempts` within `window` gets `429` even with the right password.
+IPv6 clients are counted per /64 network.
+`/login` accepts JSON only (`Content-Type: application/json`); other requests get `400` and are not counted.
+
+With `login-form` enabled, the API no longer accepts Basic Auth headers: only the session cookie set by `/login` authenticates requests.
+Sessions are kept in memory, so restarting Gatus revokes all sessions (e.g. after changing the password).
 
 | Parameter                             | Description                                                      | Default |
 |:--------------------------------------|:-----------------------------------------------------------------|:--------|
