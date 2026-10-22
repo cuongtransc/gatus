@@ -1,6 +1,9 @@
 package security
 
-import "time"
+import (
+	"encoding/base64"
+	"time"
+)
 
 // DefaultBasicSessionTTL is the default lifetime of a session created through the login form
 const DefaultBasicSessionTTL = 8 * time.Hour
@@ -19,6 +22,14 @@ type BasicConfig struct {
 
 	// SessionTTL is the lifetime of a login form session, e.g. 8h. Defaults to 8 hours
 	SessionTTL time.Duration `yaml:"session-ttl,omitempty"`
+}
+
+// decodedPasswordHash returns the base64 (URL encoding) decoded bcrypt hash
+func (c *BasicConfig) decodedPasswordHash() ([]byte, error) {
+	if len(c.PasswordBcryptHashBase64Encoded) == 0 {
+		return nil, nil
+	}
+	return base64.URLEncoding.DecodeString(c.PasswordBcryptHashBase64Encoded)
 }
 
 // isValid returns whether the basic security configuration is valid or not

@@ -1,7 +1,6 @@
 package security
 
 import (
-	"encoding/base64"
 	"net/http"
 
 	g8 "github.com/TwiN/g8/v2"
@@ -62,13 +61,19 @@ func (c *Config) RegisterHandlers(router fiber.Router) error {
 		router.All("/authorization-code/callback", adaptor.HTTPHandlerFunc(c.OIDC.callbackHandler))
 		logr.Infof("[security.RegisterHandlers] Registered OIDC routes (/oidc/login, /authorization-code/callback)")
 	}
+	if c.Basic != nil && c.Basic.LoginForm {
+		limiter.configure(c.BruteForce)
+		router.Post("/login", c.loginHandler)
+		router.Post("/logout", c.logoutHandler)
+		logr.Infof("[security.RegisterHandlers] Registered login form routes (/login, /logout)")
+	}
 	return nil
 }
 
 // ApplySecurityMiddleware applies an authentication middleware to the router passed.
 // The router passed should be a sub-router in charge of handlers that require authentication.
 func (c *Config) ApplySecurityMiddleware(router fiber.Router) error {
-	if c.OIDC != nil {
+	if c.usesSessions() {
 		// We're going to use g8 for session handling
 		clientProvider := g8.NewClientProvider(func(token string) *g8.Client {
 			if _, exists := sessions.Get(token); exists {
@@ -88,13 +93,9 @@ func (c *Config) ApplySecurityMiddleware(router fiber.Router) error {
 		c.gate = g8.New().WithAuthorizationService(authorizationService).WithCustomTokenExtractor(customTokenExtractorFunc)
 		router.Use(adaptor.HTTPMiddleware(c.gate.Protect))
 	} else if c.Basic != nil {
-		var decodedBcryptHash []byte
-		if len(c.Basic.PasswordBcryptHashBase64Encoded) > 0 {
-			var err error
-			decodedBcryptHash, err = base64.URLEncoding.DecodeString(c.Basic.PasswordBcryptHashBase64Encoded)
-			if err != nil {
-				return err
-			}
+		decodedBcryptHash, err := c.Basic.decodedPasswordHash()
+		if err != nil {
+			return err
 		}
 		router.Use(basicauth.New(basicauth.Config{
 			Authorizer: func(username, password string) bool {
