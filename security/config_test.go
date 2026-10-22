@@ -218,11 +218,14 @@ func TestConfig_RegisterHandlers(t *testing.T) {
 func TestConfig_ValidateAndSetDefaults_LoginForm(t *testing.T) {
 	c := &Config{Basic: &BasicConfig{
 		Username:                        "test",
-		PasswordBcryptHashBase64Encoded: "somevalue",
+		PasswordBcryptHashBase64Encoded: hunter2BcryptB64,
 		LoginForm:                       true,
 	}}
 	if !c.ValidateAndSetDefaults() {
 		t.Fatal("expected config to be valid")
+	}
+	if len(c.passwordHash) == 0 {
+		t.Error("expected the decoded password hash to be stored")
 	}
 	if c.Basic.SessionTTL != DefaultBasicSessionTTL {
 		t.Errorf("expected session TTL %s, got %s", DefaultBasicSessionTTL, c.Basic.SessionTTL)
@@ -232,6 +235,17 @@ func TestConfig_ValidateAndSetDefaults_LoginForm(t *testing.T) {
 	}
 	if c.BruteForce.MaxAttempts != 5 || c.BruteForce.Window != 15*time.Minute || c.BruteForce.BlockDuration != 30*time.Minute {
 		t.Errorf("unexpected brute-force defaults: %+v", c.BruteForce)
+	}
+}
+
+func TestConfig_ValidateAndSetDefaults_LoginFormMalformedHash(t *testing.T) {
+	c := &Config{Basic: &BasicConfig{
+		Username:                        "test",
+		PasswordBcryptHashBase64Encoded: "not-base64!!",
+		LoginForm:                       true,
+	}}
+	if c.ValidateAndSetDefaults() {
+		t.Error("expected a malformed password-bcrypt-base64 to be invalid when login-form is enabled")
 	}
 }
 

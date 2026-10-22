@@ -27,7 +27,8 @@ type Config struct {
 
 	gate *g8.Gate
 
-	// passwordHash is the decoded bcrypt hash, set by RegisterHandlers when the login form is enabled
+	// passwordHash is the decoded bcrypt hash, set by ValidateAndSetDefaults (and re-checked by RegisterHandlers)
+	// when the login form is enabled
 	passwordHash []byte
 }
 
@@ -40,6 +41,12 @@ func (c *Config) ValidateAndSetDefaults() bool {
 		if c.Basic.SessionTTL < 0 {
 			return false
 		}
+		hash, err := c.Basic.decodedPasswordHash()
+		if err != nil {
+			logr.Errorf("[security.ValidateAndSetDefaults] invalid password-bcrypt-base64: %v", err)
+			return false
+		}
+		c.passwordHash = hash
 		if c.Basic.SessionTTL == 0 {
 			c.Basic.SessionTTL = DefaultBasicSessionTTL
 		}

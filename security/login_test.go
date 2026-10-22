@@ -208,10 +208,8 @@ func TestLogin_NotRegisteredWithoutLoginForm(t *testing.T) {
 }
 
 func TestLogin_RegisterHandlersRejectsMalformedHash(t *testing.T) {
+	// ValidateAndSetDefaults rejects this hash; RegisterHandlers keeps its own decode as a defensive check
 	c := &Config{Basic: &BasicConfig{Username: "john.doe", PasswordBcryptHashBase64Encoded: "not-base64!!", LoginForm: true}}
-	if !c.ValidateAndSetDefaults() {
-		t.Fatal("expected config to be valid")
-	}
 	if err := c.RegisterHandlers(fiber.New()); err == nil {
 		t.Error("expected an error for a malformed password hash")
 	}
