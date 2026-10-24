@@ -1,0 +1,20 @@
+# Demo of the username/password login form: `mise run dev:login`, then open http://localhost:8080
+# Credentials: john.doe / hunter2 (the public test pair used by the repo's tests).
+# The hash comes from HUNTER2_BCRYPT_B64, set by the dev:login task in mise.toml.
+# Never use it in production.
+security:
+  basic:
+    username: "john.doe"
+    password-bcrypt-base64: "${HUNTER2_BCRYPT_B64}"
+    login-form: true
+  # Low limits so blocking is quick to try: the 4th attempt within 15m is refused for 2m.
+  brute-force:
+    max-attempts: 3
+    block-duration: 2m
+
+endpoints:
+  - name: example
+    url: "https://example.org"
+    interval: 1m
+    conditions:
+      - "[STATUS] == 200"
