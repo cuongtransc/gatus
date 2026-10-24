@@ -27,7 +27,7 @@ security:
     login-form: true        # new, default false
     session-ttl: 8h         # new, default 8h (same default as OIDC); only used with login-form
   brute-force:              # new, optional; defaults apply when login-form is on
-    max-attempts: 5         # failed logins per IP within window before blocking
+    max-attempts: 5         # login attempts per IP (IPv6: per /64) within window before blocking
     window: 15m
     block-duration: 30m
     trusted-proxies: []     # extra CIDRs allowed to set CF-Connecting-IP (e.g. cloudflared tunnel)
@@ -42,16 +42,20 @@ session middleware accepts either; the UI then shows the form and the OIDC butto
 
 ### Routes (registered in `RegisterHandlers`, i.e. unprotected)
 
-- `POST /login` — body JSON `{"username","password"}` or form-encoded.
-  1. `ip := ClientIP(ctx)`; if `limiter.Blocked(ip)` → `429` + `Retry-After: <seconds>`.
+- `POST /login` — body JSON `{"username","password"}` only (`Content-Type: application/json`);
+  any other content type or a malformed/empty body → `400 {"error":"invalid request"}`, not
+  counted. JSON-only so a cross-site form post (no CORS preflight) cannot lock out the
+  owner's IP.
+  1. `ip := clientIP(ctx)`; `limiter.Attempt(ip)` counts the attempt under one lock before any
+     credential check (parallel requests cannot exceed the cap). Refused → `429` +
+     `Retry-After: <seconds>`; when this attempt starts the block, log `WARN` with IP and duration.
   2. bcrypt compare always runs (also for a wrong username, against the configured hash) so
      response time does not reveal valid usernames.
-  3. Failure → `limiter.Fail(ip)`, `401 {"error":"invalid credentials"}`. If this failure trips
-     the block, log `WARN` with IP and duration.
+  3. Failure → `401 {"error":"invalid credentials"}` (already counted).
   4. Success → `limiter.Reset(ip)`, 32-byte random token (`crypto/rand`, base64url) stored in the
      existing `sessions` cache with `session-ttl`, cookie `gatus_session` (`HttpOnly`,
-     `SameSite=Lax`, `Path=/`, `Secure` when the request scheme is https or
-     `X-Forwarded-Proto`/CF says https from a trusted peer), `200`.
+     `SameSite=Lax`, `Path=/`, `Secure` when the connection is TLS, or a trusted peer sends
+     `X-Forwarded-Proto: https` / `CF-Visitor` scheme https), `200`.
 - `POST /logout` — deletes the session from `sessions`, expires the cookie, `200`.
 
 ### Middleware
@@ -76,11 +80,12 @@ The Cloudflare list is a Go slice in the package with a comment pointing to
 Package-level (like `sessions`) so state survives config hot-reload; config values are
 re-applied on reload.
 
-- `Fail(ip)`: record failure; failures older than `window` are dropped; reaching
-  `max-attempts` sets `blockedUntil = now + block-duration` and clears the counter.
-- `Blocked(ip) (bool, time.Duration)`, `Reset(ip)`.
-- Bounded memory: at most 10 000 tracked IPs; expired entries are pruned on access and by a
-  periodic sweep; when full, the oldest non-blocked entry is evicted.
+- `Attempt(ip) (allowed bool, retryAfter time.Duration, blockedNow bool)`: counts every attempt
+  in a fixed window from the first one; the attempt after `max-attempts` is refused and sets
+  `blockedUntil = now + block-duration`. `Reset(ip)` on successful login.
+- Key: IPv4 address as is; IPv6 by its /64 (what one IPv6 host controls).
+- Bounded memory: at most 10 000 tracked keys; pruning runs on insert when full (expired
+  entries first, then the oldest non-blocked entry).
 - Injectable clock for tests.
 
 Known limits: state is in-memory, so it is per replica and lost on restart. Acceptable for a
