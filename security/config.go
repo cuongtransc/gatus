@@ -1,7 +1,6 @@
 package security
 
 import (
-	"encoding/base64"
 	"net/http"
 
 	g8 "github.com/TwiN/g8/v2"
@@ -23,12 +22,42 @@ type Config struct {
 	Basic *BasicConfig `yaml:"basic,omitempty"`
 	OIDC  *OIDCConfig  `yaml:"oidc,omitempty"`
 
+	// BruteForce configures IP blocking for the login form. Defaults are applied when Basic.LoginForm is enabled.
+	BruteForce *BruteForceConfig `yaml:"brute-force,omitempty"`
+
 	gate *g8.Gate
+
+	// passwordHash is the decoded bcrypt hash, set by ValidateAndSetDefaults (and re-checked by RegisterHandlers)
+	// when the login form is enabled
+	passwordHash []byte
 }
 
 // ValidateAndSetDefaults returns whether the security configuration is valid or not and sets default values.
 func (c *Config) ValidateAndSetDefaults() bool {
-	return (c.Basic == nil || c.Basic.isValid()) && (c.OIDC == nil || c.OIDC.ValidateAndSetDefaults())
+	if (c.Basic != nil && !c.Basic.isValid()) || (c.OIDC != nil && !c.OIDC.ValidateAndSetDefaults()) {
+		return false
+	}
+	if c.Basic != nil && c.Basic.LoginForm {
+		if c.Basic.SessionTTL < 0 {
+			return false
+		}
+		hash, err := c.Basic.decodedPasswordHash()
+		if err != nil {
+			logr.Errorf("[security.ValidateAndSetDefaults] invalid password-bcrypt-base64: %v", err)
+			return false
+		}
+		c.passwordHash = hash
+		if c.Basic.SessionTTL == 0 {
+			c.Basic.SessionTTL = DefaultBasicSessionTTL
+		}
+		if c.BruteForce == nil {
+			c.BruteForce = &BruteForceConfig{}
+		}
+	}
+	if c.BruteForce != nil {
+		return c.BruteForce.ValidateAndSetDefaults()
+	}
+	return true
 }
 
 // RegisterHandlers registers all handlers required based on the security configuration
@@ -42,13 +71,25 @@ func (c *Config) RegisterHandlers(router fiber.Router) error {
 		router.All("/authorization-code/callback", adaptor.HTTPHandlerFunc(c.OIDC.callbackHandler))
 		logr.Infof("[security.RegisterHandlers] Registered OIDC routes (/oidc/login, /authorization-code/callback)")
 	}
+	if c.Basic != nil && c.Basic.LoginForm {
+		hash, err := c.Basic.decodedPasswordHash()
+		if err != nil {
+			logr.Errorf("[security.RegisterHandlers] Failed to decode password-bcrypt-base64: %s", err.Error())
+			return err
+		}
+		c.passwordHash = hash
+		limiter.configure(c.BruteForce)
+		router.Post("/login", c.loginHandler)
+		router.Post("/logout", c.logoutHandler)
+		logr.Infof("[security.RegisterHandlers] Registered login form routes (/login, /logout)")
+	}
 	return nil
 }
 
 // ApplySecurityMiddleware applies an authentication middleware to the router passed.
 // The router passed should be a sub-router in charge of handlers that require authentication.
 func (c *Config) ApplySecurityMiddleware(router fiber.Router) error {
-	if c.OIDC != nil {
+	if c.usesSessions() {
 		// We're going to use g8 for session handling
 		clientProvider := g8.NewClientProvider(func(token string) *g8.Client {
 			if _, exists := sessions.Get(token); exists {
@@ -68,13 +109,9 @@ func (c *Config) ApplySecurityMiddleware(router fiber.Router) error {
 		c.gate = g8.New().WithAuthorizationService(authorizationService).WithCustomTokenExtractor(customTokenExtractorFunc)
 		router.Use(adaptor.HTTPMiddleware(c.gate.Protect))
 	} else if c.Basic != nil {
-		var decodedBcryptHash []byte
-		if len(c.Basic.PasswordBcryptHashBase64Encoded) > 0 {
-			var err error
-			decodedBcryptHash, err = base64.URLEncoding.DecodeString(c.Basic.PasswordBcryptHashBase64Encoded)
-			if err != nil {
-				return err
-			}
+		decodedBcryptHash, err := c.Basic.decodedPasswordHash()
+		if err != nil {
+			return err
 		}
 		router.Use(basicauth.New(basicauth.Config{
 			Authorizer: func(username, password string) bool {

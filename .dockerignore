@@ -6,3 +6,5 @@ Dockerfile
 web/app
 *.db
 testdata
+.superpowers
+.worktrees

@@ -1,0 +1,59 @@
+min_version = "2026.9.0"
+
+[settings]
+experimental = true              # [deps] is experimental
+
+[deps.web]
+auto = true
+sources = ["web/app/package.json", "web/app/package-lock.json"]
+outputs = ["web/app/node_modules/.package-lock.json"]
+run = "npm --prefix web/app ci"
+
+[tasks.dev]
+description = "Run Gatus locally against ./config.yaml"
+env = { ENVIRONMENT = "dev", GATUS_CONFIG_PATH = "./config.yaml" }
+run = "go run ."
+
+[tasks.build]
+description = "Build the gatus binary into ./gatus"
+run = "go build -o gatus ."
+
+[tasks."build:web"]
+description = "Rebuild the embedded UI (web/static) after web/app changes"
+run = "npm --prefix web/app run build"
+
+[tasks.test]
+description = "Run Go unit tests"
+run = "go test ./... -cover"
+
+[tasks.ci]
+description = "Gate: vet and unit tests"
+depends = ["test"]
+run = "go vet ./..."
+
+# Local single-arch image, loaded into the docker daemon.
+[tasks."docker:build"]
+description = "Build the image locally as $IMAGE:<sha> and :latest"
+run = """
+set -eu
+image="${IMAGE:-cuongtransc/gatus}"
+tag="$(git rev-parse --short HEAD)"
+docker buildx build --load -t "$image:$tag" -t "$image:latest" .
+"""
+
+# Server is Linux amd64; the Dockerfile cross-compiles, so this is fast on an arm64 Mac.
+# Requires `docker login` to the registry first.
+[tasks.release]
+description = "Build linux/amd64 image and push $IMAGE:<sha> and :latest"
+run = """
+set -eu
+image="${IMAGE:-cuongtransc/gatus}"
+tag="$(git rev-parse --short HEAD)"
+if [ -n "$(git status --porcelain)" ]; then
+  echo "release: working tree is dirty; commit first so the tag matches the image" >&2
+  exit 1
+fi
+docker buildx build --platform linux/amd64 \
+  -t "$image:$tag" -t "$image:latest" --push .
+echo "pushed $image:$tag and $image:latest"
+"""

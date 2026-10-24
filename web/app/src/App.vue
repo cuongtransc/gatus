@@ -6,7 +6,7 @@
     </div>
 
     <!-- Main App Container -->
-    <div v-else-if="!config || !config.oidc || config.authenticated" class="relative">
+    <div v-else-if="!config || !(config.oidc || config.loginForm) || config.authenticated" class="relative">
       <!-- Header -->
       <header class="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/60">
         <div class="container mx-auto px-4 py-4 max-w-7xl">
@@ -68,6 +68,17 @@
                 <Menu v-if="!mobileMenuOpen" class="h-5 w-5" />
                 <X v-else class="h-5 w-5" />
               </Button>
+
+              <!-- Logout -->
+              <Button
+                v-if="config.loginForm && config.authenticated"
+                variant="ghost"
+                size="sm"
+                @click="logout"
+              >
+                <LogOut class="mr-2 h-4 w-4" />
+                Logout
+              </Button>
             </div>
           </div>
 
@@ -108,7 +119,7 @@
       </footer>
     </div>
 
-    <!-- OIDC Login Screen -->
+    <!-- Login Screen -->
     <div v-else id="login-container" class="flex items-center justify-center min-h-screen p-4">
       <Card class="w-full max-w-md">
         <CardHeader class="text-center">
@@ -132,8 +143,49 @@
               </p>
             </div>
           </div>
-          
+
+          <form v-if="config.loginForm" @submit.prevent="submitLogin" class="space-y-4">
+            <div class="space-y-2">
+              <label for="login-username" class="text-sm font-medium">Username</label>
+              <Input
+                id="login-username"
+                v-model="loginUsername"
+                type="text"
+                autocomplete="username"
+                required
+                autofocus
+              />
+            </div>
+            <div class="space-y-2">
+              <label for="login-password" class="text-sm font-medium">Password</label>
+              <Input
+                id="login-password"
+                v-model="loginPassword"
+                type="password"
+                autocomplete="current-password"
+                required
+              />
+            </div>
+            <div v-if="loginError" class="p-3 rounded-md bg-destructive/10 border border-destructive/20">
+              <p class="text-sm text-destructive text-center">{{ loginError }}</p>
+            </div>
+            <Button type="submit" class="w-full h-11" :disabled="isLoginLoading">
+              <Loading v-if="isLoginLoading" size="xs" />
+              <template v-else>
+                <LogIn class="mr-2 h-4 w-4" />
+                Sign in
+              </template>
+            </Button>
+          </form>
+
+          <div v-if="config.loginForm && config.oidc" class="flex items-center gap-3 my-4">
+            <div class="h-px flex-1 bg-border"></div>
+            <span class="text-xs text-muted-foreground">or</span>
+            <div class="h-px flex-1 bg-border"></div>
+          </div>
+
           <a
+            v-if="config.oidc"
             :href="`/oidc/login`"
             class="inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 bg-primary text-primary-foreground hover:bg-primary/90 h-11 px-8 w-full"
             @click="isOidcLoading = true"
@@ -156,8 +208,9 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute } from 'vue-router'
-import { Menu, X, LogIn } from 'lucide-vue-next'
+import { Menu, X, LogIn, LogOut } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import Social from './components/Social.vue'
 import Tooltip from './components/Tooltip.vue'
@@ -167,11 +220,15 @@ const route = useRoute()
 
 // State
 const retrievedConfig = ref(false)
-const config = ref({ oidc: false, authenticated: true })
+const config = ref({ oidc: false, loginForm: false, authenticated: true })
 const announcements = ref([])
 const tooltip = ref({})
 const mobileMenuOpen = ref(false)
 const isOidcLoading = ref(false)
+const loginUsername = ref('')
+const loginPassword = ref('')
+const loginError = ref('')
+const isLoginLoading = ref(false)
 const tooltipIsPersistent = ref(false)
 let configInterval = null
 
@@ -210,6 +267,45 @@ const fetchConfig = async () => {
     console.error('Failed to fetch config:', error)
     retrievedConfig.value = true
   }
+}
+
+const submitLogin = async () => {
+  isLoginLoading.value = true
+  loginError.value = ''
+  try {
+    const response = await fetch(`/login`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: loginUsername.value, password: loginPassword.value })
+    })
+    if (response.status === 200) {
+      loginPassword.value = ''
+      loginError.value = ''
+      await fetchConfig()
+    } else if (response.status === 401) {
+      loginError.value = 'Invalid username or password'
+    } else if (response.status === 429) {
+      const minutes = Math.ceil(Number(response.headers.get('Retry-After') || 60) / 60)
+      loginError.value = `Too many failed attempts. Try again in ${minutes} min.`
+    } else {
+      loginError.value = `Login failed (HTTP ${response.status})`
+    }
+  } catch (error) {
+    console.error('Login request failed:', error)
+    loginError.value = 'Login failed: server unreachable'
+  } finally {
+    isLoginLoading.value = false
+  }
+}
+
+const logout = async () => {
+  try {
+    await fetch(`/logout`, { method: 'POST', credentials: 'include' })
+  } catch (error) {
+    console.error('Logout request failed:', error)
+  }
+  await fetchConfig()
 }
 
 const showTooltip = (result, event, action = 'hover') => {

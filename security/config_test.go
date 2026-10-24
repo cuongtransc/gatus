@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/oauth2"
@@ -75,6 +76,14 @@ func TestConfig_ValidateAndSetDefaults(t *testing.T) {
 				OIDC:  validOIDCConfig,
 			},
 			ExpectValid: true,
+		},
+		{
+			Name: "invalid-brute-force",
+			Config: &Config{
+				Basic:      validBasicConfig,
+				BruteForce: &BruteForceConfig{MaxAttempts: -1},
+			},
+			ExpectValid: false,
 		},
 	}
 	for _, scenario := range scenarios {
@@ -203,5 +212,94 @@ func TestConfig_RegisterHandlers(t *testing.T) {
 	}
 	if response.StatusCode != 302 {
 		t.Error("expected code to be 302, but was", response.StatusCode)
+	}
+}
+
+func TestConfig_ValidateAndSetDefaults_LoginForm(t *testing.T) {
+	c := &Config{Basic: &BasicConfig{
+		Username:                        "test",
+		PasswordBcryptHashBase64Encoded: hunter2BcryptB64,
+		LoginForm:                       true,
+	}}
+	if !c.ValidateAndSetDefaults() {
+		t.Fatal("expected config to be valid")
+	}
+	if len(c.passwordHash) == 0 {
+		t.Error("expected the decoded password hash to be stored")
+	}
+	if c.Basic.SessionTTL != DefaultBasicSessionTTL {
+		t.Errorf("expected session TTL %s, got %s", DefaultBasicSessionTTL, c.Basic.SessionTTL)
+	}
+	if c.BruteForce == nil {
+		t.Fatal("expected brute-force defaults to be set when login-form is enabled")
+	}
+	if c.BruteForce.MaxAttempts != 5 || c.BruteForce.Window != 15*time.Minute || c.BruteForce.BlockDuration != 30*time.Minute {
+		t.Errorf("unexpected brute-force defaults: %+v", c.BruteForce)
+	}
+}
+
+func TestConfig_ValidateAndSetDefaults_LoginFormMalformedHash(t *testing.T) {
+	c := &Config{Basic: &BasicConfig{
+		Username:                        "test",
+		PasswordBcryptHashBase64Encoded: "not-base64!!",
+		LoginForm:                       true,
+	}}
+	if c.ValidateAndSetDefaults() {
+		t.Error("expected a malformed password-bcrypt-base64 to be invalid when login-form is enabled")
+	}
+}
+
+func TestConfig_ValidateAndSetDefaults_BasicWithoutLoginFormKeepsBruteForceNil(t *testing.T) {
+	c := &Config{Basic: &BasicConfig{Username: "test", PasswordBcryptHashBase64Encoded: "somevalue"}}
+	if !c.ValidateAndSetDefaults() {
+		t.Fatal("expected config to be valid")
+	}
+	if c.BruteForce != nil {
+		t.Error("expected brute-force to stay nil without login-form")
+	}
+}
+
+func TestConfig_ValidateAndSetDefaults_LoginFormNegativeSessionTTL(t *testing.T) {
+	c := &Config{Basic: &BasicConfig{
+		Username:                        "test",
+		PasswordBcryptHashBase64Encoded: "somevalue",
+		LoginForm:                       true,
+		SessionTTL:                      -time.Second,
+	}}
+	if c.ValidateAndSetDefaults() {
+		t.Error("expected negative session-ttl to be invalid")
+	}
+}
+
+func TestBruteForceConfig_ValidateAndSetDefaults(t *testing.T) {
+	scenarios := []struct {
+		Name            string
+		Config          *BruteForceConfig
+		ExpectValid     bool
+		ExpectedNetsLen int
+	}{
+		{Name: "zero-values-get-defaults", Config: &BruteForceConfig{}, ExpectValid: true},
+		{Name: "negative-max-attempts", Config: &BruteForceConfig{MaxAttempts: -1}, ExpectValid: false},
+		{Name: "negative-window", Config: &BruteForceConfig{Window: -time.Second}, ExpectValid: false},
+		{Name: "negative-block-duration", Config: &BruteForceConfig{BlockDuration: -time.Second}, ExpectValid: false},
+		{Name: "valid-trusted-proxies", Config: &BruteForceConfig{TrustedProxies: []string{"10.0.0.0/8", "192.168.1.5", "2001:db8::/32", "::1"}}, ExpectValid: true, ExpectedNetsLen: 4},
+		{Name: "invalid-trusted-proxy", Config: &BruteForceConfig{TrustedProxies: []string{"not-an-ip"}}, ExpectValid: false},
+	}
+	for _, scenario := range scenarios {
+		t.Run(scenario.Name, func(t *testing.T) {
+			isValid := scenario.Config.ValidateAndSetDefaults()
+			if isValid != scenario.ExpectValid {
+				t.Fatalf("expected valid=%v, got %v", scenario.ExpectValid, isValid)
+			}
+			if !isValid {
+				return
+			}
+			if scenario.Config.MaxAttempts < 1 || scenario.Config.Window <= 0 || scenario.Config.BlockDuration <= 0 {
+				t.Errorf("expected defaults to be set, got %+v", scenario.Config)
+			}
+			if len(scenario.Config.trustedNets) != scenario.ExpectedNetsLen {
+				t.Errorf("expected %d trusted nets, got %d", scenario.ExpectedNetsLen, len(scenario.Config.trustedNets))
+			}
+		})
 	}
 }

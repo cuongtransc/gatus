@@ -1,10 +1,13 @@
 # Build the go application into a binary
-FROM golang:alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:alpine AS builder
+ARG TARGETOS TARGETARCH
 RUN apk --update add ca-certificates
 WORKDIR /app
 COPY . ./
 RUN go mod tidy -diff
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o gatus .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    --mount=type=cache,target=/go/pkg/mod \
+    CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -a -installsuffix cgo -o gatus .
 
 # Run Tests inside docker image if you don't have a configured go environment
 #RUN apk update && apk add --virtual build-dependencies build-base gcc

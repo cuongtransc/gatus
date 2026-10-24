@@ -17,16 +17,19 @@ type ConfigHandler struct {
 
 func (handler ConfigHandler) GetConfig(c *fiber.Ctx) error {
 	hasOIDC := false
+	hasLoginForm := false
 	isAuthenticated := true // Default to true if no security config is set
 	if handler.securityConfig != nil {
 		hasOIDC = handler.securityConfig.OIDC != nil
+		hasLoginForm = handler.securityConfig.Basic != nil && handler.securityConfig.Basic.LoginForm
 		isAuthenticated = handler.securityConfig.IsAuthenticated(c)
 	}
-	logr.Debugf("[api.GetConfig] /api/v1/config: oidc=%v, authenticated=%v", hasOIDC, isAuthenticated)
+	logr.Debugf("[api.GetConfig] /api/v1/config: oidc=%v, loginForm=%v, authenticated=%v", hasOIDC, hasLoginForm, isAuthenticated)
 
 	// Prepare response with announcements
 	response := map[string]interface{}{
 		"oidc":          hasOIDC,
+		"loginForm":     hasLoginForm,
 		"authenticated": isAuthenticated,
 	}
 	// Add announcements if available, otherwise use empty slice
