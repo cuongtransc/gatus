@@ -14,6 +14,17 @@ description = "Run Gatus locally against ./config.yaml"
 env = { ENVIRONMENT = "dev", GATUS_CONFIG_PATH = "./config.yaml" }
 run = "go run ."
 
+# Demo of the login form; credentials are the public test pair, never use them in production.
+[tasks."dev:login"]
+description = "Run Gatus with the login form demo (john.doe / hunter2)"
+run = "go run ."
+
+[tasks."dev:login".env]
+ENVIRONMENT = "dev"
+GATUS_CONFIG_PATH = ".examples/login-form/config.yaml"
+# bcrypt hash of "hunter2", base64 (same value as the repo's tests); expanded into the demo config
+HUNTER2_BCRYPT_B64 = "JDJhJDA4JDFoRnpPY1hnaFl1OC9ISlFsa21VS09wOGlPU1ZOTDlHZG1qeTFvb3dIckRBUnlHUmNIRWlT"
+
 [tasks.build]
 description = "Build the gatus binary into ./gatus"
 run = "go build -o gatus ."
