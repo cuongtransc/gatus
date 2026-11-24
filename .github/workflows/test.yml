@@ -15,15 +15,18 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      # The levels size their parallel test workers from this (DLV-002).
+      CI_SLOT_JOBS: 4
     steps:
-      - uses: actions/setup-go@v7
-        with:
-          go-version: 1.26.3
       - uses: actions/checkout@v7
-      - name: Build binary to make sure it works
-        run: go build
-      - name: Test
-        # We're using "sudo" because one of the tests leverages ping, which requires super-user privileges.
-        # As for the 'env "PATH=$PATH" "GOROOT=$GOROOT"', we need it to use the same "go" executable that
-        # was configured by the "Set up Go" step (otherwise, it'd use sudo's "go" executable)
-        run: sudo env "PATH=$PATH" "GOROOT=$GOROOT" go test ./... -race
+      - uses: jdx/mise-action@v2
+      # DLV-002: the change level on a pull request, the full level on the
+      # integration branch. The suite used to run under sudo for a privileged
+      # ICMP path no unit test exercises; it now runs unprivileged.
+      - name: Change level
+        if: github.event_name == 'pull_request'
+        run: mise run ci
+      - name: Full level
+        if: github.event_name == 'push'
+        run: mise run ci:full
