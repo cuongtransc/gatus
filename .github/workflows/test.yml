@@ -22,13 +22,15 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v2
       # DLV-002: the change level on a pull request, the full level on the
-      # integration branch. The job used to run `go test ./... -race` under sudo
-      # for a privileged ICMP path; a level cannot run as root (the slot reads
-      # git), so the suite runs as the runner user and TestPing uses an
-      # unprivileged ICMP socket.
+      # integration branch. `--no-deps` keeps the frontend provider out of this
+      # Go job — test-ui owns the Vue build — so what runs here is the level,
+      # `mise run ci` respectively `mise run ci:full`, without it. The job used
+      # to run `go test ./... -race` under sudo for a privileged ICMP path; a
+      # level cannot run as root (the slot reads git), so the suite runs as the
+      # runner user and TestPing uses an unprivileged ICMP socket.
       - name: Change level
         if: github.event_name == 'pull_request'
-        run: mise run ci
+        run: mise run --no-deps ci
       - name: Full level
         if: github.event_name == 'push'
-        run: mise run ci:full
+        run: mise run --no-deps ci:full

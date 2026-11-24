@@ -101,6 +101,11 @@ them. The Go unit tests are the whole suite at every level — there is no chang
 selector, and the suite is under both the `ci:fast` and the `ci` budget, so the levels run
 it in full.
 
+`lint` is the `go vet ./...` the repo's `ci` task already ran, not the subset `go test`
+checks by default: the pipeline did not run vet before this change, so a pull request now
+rejects a vet finding that `go test` used to ignore. The pipeline also runs without the
+`web/app` dependencies (`--no-deps`), since the Go tests need no frontend packages.
+
 Where each level runs:
 
 - `.github/workflows/test.yml` is the pipeline: a pull request runs `ci`, a push to `master`
