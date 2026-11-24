@@ -25,8 +25,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
       # client.TestPing needs an ICMP socket. The job used to get one by running
-      # the whole suite under sudo; under root, git refuses the runner-owned
-      # checkout (safe.directory) and the level reads git, so the runner gets the socket permission instead and the suite
+      # the whole suite under sudo; the levels run as the runner user like on a
+      # dev machine, so the runner gets the socket permission instead and the suite
       # stays unprivileged.
       - name: Allow unprivileged ICMP for the ping tests
         run: sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
