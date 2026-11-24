@@ -3,6 +3,10 @@ min_version = "2026.9.0"
 [settings]
 experimental = true              # [deps] is experimental
 
+# The version go.mod demands, and the one .github/workflows/test.yml runs.
+[tools]
+go = "1.26.3"
+
 [deps.web]
 auto = true
 sources = ["web/app/package.json", "web/app/package-lock.json"]
@@ -33,14 +37,61 @@ run = "go build -o gatus ."
 description = "Rebuild the embedded UI (web/static) after web/app changes"
 run = "npm --prefix web/app run build"
 
+[tasks.lint]
+description = "Report go vet findings without changing any file"
+run = 'go vet -p "${CI_SLOT_JOBS:-1}" ./...'
+
+# -p comes from CI_SLOT_JOBS (DLV-002): ci:fast forces one process, and the
+# guard line sets the slot's worker count for ci and ci:full.
 [tasks.test]
 description = "Run Go unit tests"
-run = "go test ./... -cover"
+run = 'go test -p "${CI_SLOT_JOBS:-1}" ./... -cover'
 
+[tasks."test:race"]
+description = "Run the Go unit tests under the race detector"
+run = 'go test -p "${CI_SLOT_JOBS:-1}" ./... -race'
+
+# DLV-002 levels. Each body starts with its guard line and carries its own
+# steps: a `depends` would run before the guard could take the slot.
+# ci:fast takes no slot, so it starts by refusing a task borrowed from a parent
+# checkout, and records a pass only when the tree is unchanged by the run.
+[tasks."ci:fast"]
+description = "Lint and unit tests on this worktree; no slot, no services"
+run = '''
+.mise/lib/ci-slot --own-tree
+set -e
+# One package at a time: ci:fast takes no slot, so several agents run it at once.
+export CI_SLOT_JOBS=1
+export CI_SLOT_GREEN_START="$(.mise/lib/ci-slot --tree-hash)"
+mise run lint
+mise run test
+.mise/lib/ci-slot --mark-green ci:fast
+'''
+
+# The race suite and the build are not selectable per change, so `ci` already
+# runs everything `ci:full` runs; the ladder stays nested and the two may drift
+# apart the day a selector or a heavier check arrives.
 [tasks.ci]
-description = "Gate: vet and unit tests"
-depends = ["test"]
-run = "go vet ./..."
+description = "Lint, tests, race suite and build in the slot; run when done"
+run = """
+[ -n "${CI_SLOT:-}" ] || exec .mise/lib/ci-slot ci
+set -e
+mise run lint
+mise run test
+mise run test:race
+mise run build
+"""
+
+[tasks."ci:full"]
+description = "Every check runnable from the source tree, in the slot"
+run = """
+[ -n "${CI_SLOT:-}" ] || exec .mise/lib/ci-slot ci:full
+set -e
+mise run lint
+mise run test
+mise run test:race
+mise run build
+"""
 
 # Local single-arch image, loaded into the docker daemon.
 [tasks."docker:build"]
