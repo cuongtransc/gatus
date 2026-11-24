@@ -114,8 +114,8 @@ runs `ci:full`, with `CI_SLOT_JOBS` set to the runner's core count.
 `mise run ci:full` by hand on the Linux dev VM (ct-dev).
 - The nightly `ci:full` is not registered yet; the owner registers it on this machine with
 `ct ci nightly add`.
-- The pipeline runs as the runner user, not as root (a level cannot run as root — the slot reads
-`git`), and grants the unprivileged ICMP range so `client.TestPing` can open its socket; the
+- The pipeline runs as the runner user, not as root (under root, git refuses the runner-owned
+checkout as `safe.directory`, and the level reads `git`), and grants the unprivileged ICMP range so `client.TestPing` can open its socket; the
 root branch of `ShouldRunPingerAsPrivileged` is covered by no level — open (owner).
 - No repo hook exists (the global `core.hooksPath` dispatcher runs a `.githooks/` folder
 when there is one); nothing runs a level on commit.
