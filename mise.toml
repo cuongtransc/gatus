@@ -53,6 +53,8 @@ run = 'go test -p "${CI_SLOT_JOBS:-1}" ./... -race'
 
 # DLV-002 levels. Each body starts with its guard line and carries its own
 # steps: a `depends` would run before the guard could take the slot.
+# The level needs no frontend packages, so every step skips the `[deps.web]`
+# provider (`--no-deps`); `build:web` and `dev` still install them.
 # ci:fast takes no slot, so it starts by refusing a task borrowed from a parent
 # checkout, and records a pass only when the tree is unchanged by the run.
 [tasks."ci:fast"]
@@ -63,8 +65,8 @@ set -e
 # One package at a time: ci:fast takes no slot, so several agents run it at once.
 export CI_SLOT_JOBS=1
 export CI_SLOT_GREEN_START="$(.mise/lib/ci-slot --tree-hash)"
-mise run lint
-mise run test
+mise run --no-deps lint
+mise run --no-deps test
 .mise/lib/ci-slot --mark-green ci:fast
 '''
 
@@ -76,10 +78,10 @@ description = "Lint, tests, race suite and build in the slot; run when done"
 run = """
 [ -n "${CI_SLOT:-}" ] || exec .mise/lib/ci-slot ci
 set -e
-mise run lint
-mise run test
-mise run test:race
-mise run build
+mise run --no-deps lint
+mise run --no-deps test
+mise run --no-deps test:race
+mise run --no-deps build
 """
 
 [tasks."ci:full"]
@@ -87,10 +89,10 @@ description = "Every check runnable from the source tree, in the slot"
 run = """
 [ -n "${CI_SLOT:-}" ] || exec .mise/lib/ci-slot ci:full
 set -e
-mise run lint
-mise run test
-mise run test:race
-mise run build
+mise run --no-deps lint
+mise run --no-deps test
+mise run --no-deps test:race
+mise run --no-deps build
 """
 
 # Local single-arch image, loaded into the docker daemon.

@@ -16,18 +16,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      # The levels size their parallel test workers from this (DLV-002).
+      # This job is the pipeline, so the level runs directly instead of queueing
+      # for a machine slot, and it sizes its test workers from CI_SLOT_JOBS
+      # (DLV-002).
+      CI_SLOT: pipeline
       CI_SLOT_JOBS: 4
     steps:
       - uses: actions/checkout@v7
       - uses: jdx/mise-action@v2
+      # client.TestPing needs an ICMP socket. The job used to get one by running
+      # the whole suite under sudo; a level cannot run as root (the slot reads
+      # git), so the runner gets the socket permission instead and the suite
+      # stays unprivileged.
+      - name: Allow unprivileged ICMP for the ping tests
+        run: sudo sysctl -w net.ipv4.ping_group_range="0 2147483647"
       # DLV-002: the change level on a pull request, the full level on the
-      # integration branch. `--no-deps` keeps the frontend provider out of this
-      # Go job — test-ui owns the Vue build — so what runs here is the level,
-      # `mise run ci` respectively `mise run ci:full`, without it. The job used
-      # to run `go test ./... -race` under sudo for a privileged ICMP path; a
-      # level cannot run as root (the slot reads git), so the suite runs as the
-      # runner user and TestPing uses an unprivileged ICMP socket.
+      # integration branch — `mise run ci` respectively `mise run ci:full`.
+      # `--no-deps` keeps the frontend provider out of this Go job; test-ui owns
+      # the Vue build.
       - name: Change level
         if: github.event_name == 'pull_request'
         run: mise run --no-deps ci

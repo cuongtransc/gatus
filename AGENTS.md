@@ -103,8 +103,8 @@ it in full.
 
 `lint` is the `go vet ./...` the repo's `ci` task already ran, not the subset `go test`
 checks by default: the pipeline did not run vet before this change, so a pull request now
-rejects a vet finding that `go test` used to ignore. The pipeline also runs without the
-`web/app` dependencies (`--no-deps`), since the Go tests need no frontend packages.
+rejects a vet finding that `go test` used to ignore. The levels run with `--no-deps`, so the
+`web/app` dependencies are not installed for them — the Go tests need no frontend packages.
 
 Where each level runs:
 
@@ -114,9 +114,9 @@ runs `ci:full`, with `CI_SLOT_JOBS` set to the runner's core count.
 `mise run ci:full` by hand on the Linux dev VM (ct-dev).
 - The nightly `ci:full` is not registered yet; the owner registers it on this machine with
 `ct ci nightly add`.
-- The pipeline runs as the runner user, not as root, so `client.TestPing` exercises the
-unprivileged ICMP socket there and the root branch of `ShouldRunPingerAsPrivileged` is not
-covered by any level — open (owner).
+- The pipeline runs as the runner user, not as root (a level cannot run as root — the slot reads
+`git`), and grants the unprivileged ICMP range so `client.TestPing` can open its socket; the
+root branch of `ShouldRunPingerAsPrivileged` is covered by no level — open (owner).
 - No repo hook exists (the global `core.hooksPath` dispatcher runs a `.githooks/` folder
 when there is one); nothing runs a level on commit.
 
