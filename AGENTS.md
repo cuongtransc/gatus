@@ -79,6 +79,43 @@ Use `alerting/provider/slack/` as the reference implementation. Every new provid
 - Use `t.Parallel()` where appropriate
 - API tests spin up test servers (see existing `*_test.go` in `api/`)
 
+## CI levels
+
+Check levels follow DLV-002. The levels are mise tasks; `ci` and `ci:full` take the
+machine slot through `.mise/lib/ci-slot` (`ct ci install` writes it), `ci:fast` takes
+none and runs single-process.
+
+| Task | Runs | Measured (one run each, 2026-11-25, ct-dev, 24 cores) |
+|---|---|---|
+| `ci:fast` | `lint` (`go vet -p 1 ./...`) and `test` (`go test -p 1 ./... -cover`) on the whole tree, one process, no slot | 60 s with Go's test cache cleared, 2 s with it warm; a fresh clone also installs `web/app` dependencies first |
+| `ci` | the same checks in the machine slot, then `test:race` and `build`, workers from `CI_SLOT_JOBS` | 1 min 40 s with the test cache cleared and four workers, 1 min warm |
+| `ci:full` | the checks `ci` runs — the race suite and the binary build are not selectable per change, so the two levels are the same today | 1 min 40 s |
+
+Measured by clearing Go's test cache (`mise exec -- go clean -testcache`) and timing
+`mise run <task>`; queue time for a slot is not included.
+
+`ci:full` does not include `test:e2e`, `test:load`, `smoke` or `uat`: the repo has none of
+them. The Go unit tests are the whole suite at every level — there is no changed-test
+selector, and the suite is under both the `ci:fast` and the `ci` budget, so the levels run
+it in full.
+
+Where each level runs:
+
+- `.github/workflows/test.yml` is the pipeline: a pull request runs `ci`, a push to `master`
+runs `ci:full`, with `CI_SLOT_JOBS` set to the runner's core count.
+- Without that pipeline — a merge nothing ran on, or a change to a workflow — run
+`mise run ci:full` by hand on the Linux dev VM (ct-dev).
+- The nightly `ci:full` is not registered yet (owner: `ct ci nightly add`).
+- No repo hook exists (the global `core.hooksPath` dispatcher runs a `.githooks/` folder
+when there is one); nothing runs a level on commit.
+
+The other files under `.github/workflows/` are upstream TwiN/gatus plumbing — label,
+publish, benchmark, static assets, the Vue build — and run no level. The embedded
+`web/static` bundle stays the `test-ui` job's business; no level rebuilds it.
+
+`client.TestCheckSSHBanner` connects to a public SSH host, so any level can flake on the
+network; rerun it before treating a red level as a code failure.
+
 ## Commits & PRs
 
 When creating a commit or PR as an agent, state that it was made by an agent and include your model name and version.
