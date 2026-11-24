@@ -91,8 +91,10 @@ none and runs single-process.
 | `ci` | the same checks in the machine slot, then `test:race` and `build`, workers from `CI_SLOT_JOBS` | 1 min 40 s with the test cache cleared and four workers, 1 min warm |
 | `ci:full` | the checks `ci` runs — the race suite and the binary build are not selectable per change, so the two levels are the same today | 1 min 40 s |
 
-Measured by clearing Go's test cache (`mise exec -- go clean -testcache`) and timing
-`mise run <task>`; queue time for a slot is not included.
+Measured by clearing Go's test cache and timing the level, one run each: `mise exec -- go
+clean -testcache`, then `time mise run ci:fast`, `time mise run ci:full`; queue time for a
+slot is not included. `ci:full` ran under `CI_SLOT=pipeline CI_SLOT_JOBS=4` so that the
+measurement held no slot.
 
 `ci:full` does not include `test:e2e`, `test:load`, `smoke` or `uat`: the repo has none of
 them. The Go unit tests are the whole suite at every level — there is no changed-test
@@ -105,7 +107,11 @@ Where each level runs:
 runs `ci:full`, with `CI_SLOT_JOBS` set to the runner's core count.
 - Without that pipeline — a merge nothing ran on, or a change to a workflow — run
 `mise run ci:full` by hand on the Linux dev VM (ct-dev).
-- The nightly `ci:full` is not registered yet (owner: `ct ci nightly add`).
+- The nightly `ci:full` is not registered yet; the owner registers it on this machine with
+`ct ci nightly add`.
+- The pipeline runs as the runner user, not as root, so `client.TestPing` exercises the
+unprivileged ICMP socket there and the root branch of `ShouldRunPingerAsPrivileged` is not
+covered by any level — open (owner).
 - No repo hook exists (the global `core.hooksPath` dispatcher runs a `.githooks/` folder
 when there is one); nothing runs a level on commit.
 
