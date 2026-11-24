@@ -85,7 +85,7 @@ Check levels follow DLV-002. The levels are mise tasks; `ci` and `ci:full` take 
 machine slot through `.mise/lib/ci-slot` (`ct ci install` writes it), `ci:fast` takes
 none and runs single-process.
 
-| Task | Runs | Measured (one run each, 2026-11-25, ct-dev, 24 cores) |
+| Task | Runs | Measured (one run each, 2026-11-25, the Linux dev VM, 24 cores) |
 |---|---|---|
 | `ci:fast` | `lint` (`go vet -p 1 ./...`) and `test` (`go test -p 1 ./... -cover`) on the whole tree, one process, no slot | 60 s with Go's test cache cleared, 2 s with it warm; a fresh clone also installs `web/app` dependencies first |
 | `ci` | the same checks in the machine slot, then `test:race` and `build`, workers from `CI_SLOT_JOBS` | 1 min 40 s with the test cache cleared and four workers, 1 min warm |
@@ -111,7 +111,7 @@ Where each level runs:
 - `.github/workflows/test.yml` is the pipeline: a pull request runs `ci`, a push to `master`
 runs `ci:full`, with `CI_SLOT_JOBS` set to the runner's core count.
 - Without that pipeline — a merge nothing ran on, or a change to a workflow — run
-`mise run ci:full` by hand on the Linux dev VM (ct-dev).
+`mise run ci:full` by hand on the Linux dev VM.
 - The nightly `ci:full` is not registered yet; the owner registers it on this machine with
 `ct ci nightly add`.
 - The pipeline runs the levels as the runner user, not as root, as a dev machine does, and grants the unprivileged ICMP range so `client.TestPing` can open its socket; the
